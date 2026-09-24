@@ -1,0 +1,58 @@
+import pandas as pd
+import numpy as np
+
+# 假设我们有一个包含股票价格和订单簿数据的数据框
+price_data = {
+    'Date': pd.date_range(start='2023-01-01', periods=100, freq='D'),
+    'Close': np.random.normal(100, 10, 100),
+    'Volume': np.random.randint(1000, 5000, 100)
+}
+order_book_data = {
+    'Price': [100, 101, 102, 103, 104, 105, 106, 107, 108, 109],
+    'BidVolume': [500, 450, 400, 350, 300, 0, 0, 0, 0, 0],
+    'AskVolume': [0, 0, 0, 0, 0, 300, 350, 400, 450, 500]
+}
+
+price_df = pd.DataFrame(price_data)
+price_df.set_index('Date', inplace=True)
+order_book_df = pd.DataFrame(order_book_data)
+
+# 计算波动性
+price_df['Return'] = price_df['Close'].pct_change()
+volatility = price_df['Return'].std()
+
+# 计算历史波动率
+historical_volatility = price_df['Return'].std() * np.sqrt(252)
+
+# 计算平均真实波动范围（ATR）
+price_df['High'] = price_df['Close'] * (1 + np.random.uniform(0, 0.05, 100))
+price_df['Low'] = price_df['Close'] * (1 - np.random.uniform(0, 0.05, 100))
+price_df['TR'] = price_df[['High', 'Low', 'Close']].apply(lambda x: max(x['High'] - x['Low'], abs(x['High'] - x['Close']), abs(x['Low'] - x['Close'])), axis=1)
+price_df['ATR'] = price_df['TR'].rolling(window=14).mean()
+
+# 计算成交量加权平均价格（VWAP）
+price_df['VWAP'] = (price_df['Close'] * price_df['Volume']).cumsum() / price_df['Volume'].cumsum()
+
+# 计算买卖价差（Bid-Ask Spread）
+bid_price = order_book_df[order_book_df['BidVolume'] > 0]['Price'].max()
+ask_price = order_book_df[order_book_df['AskVolume'] > 0]['Price'].min()
+spread = ask_price - bid_price
+
+# 计算市场深度（Market Depth）
+market_depth = order_book_df[['BidVolume', 'AskVolume']].sum()
+
+# 计算订单簿不平衡（Order Book Imbalance）
+buy_volume = order_book_df['BidVolume'].sum()
+sell_volume = order_book_df['AskVolume'].sum()
+imbalance = (buy_volume - sell_volume) / (buy_volume + sell_volume)
+
+# 打印结果
+print("Volatility:", volatility)
+print("Historical Volatility:", historical_volatility)
+print("Average True Range (ATR):", price_df['ATR'].iloc[-1])
+print("VWAP:", price_df['VWAP'].iloc[-1])
+print("Bid Price:", bid_price)
+print("Ask Price:", ask_price)
+print("Bid-Ask Spread:", spread)
+print("Market Depth:", market_depth)
+print("Order Book Imbalance:", imbalance)
