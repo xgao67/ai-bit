@@ -1,0 +1,268 @@
+
+import akshare as ak
+import pandas as pd
+def get_stock_data(symbol, start_date, end_date, period='1', adjust=''):
+    try:
+        # 获取股票分钟级历史数据
+        df = ak.stock_zh_a_hist_min_em(symbol=symbol, start_date=start_date, end_date=end_date, period=period,
+                                       adjust=adjust)
+        return df
+    except Exception as e:
+        print(f"获取数据时出现错误：{e}")
+        return None
+def process_stock_data(df):
+    if df is None:
+        return None
+    # 重命名列名为英文
+    df = df.rename(columns={
+        '时间': 'Time',
+        '开盘': 'Open',
+        '收盘': 'Close',
+        '最高': 'High',
+        '最低': 'Low',
+        '成交量': 'Volume',
+        '成交额': 'Turnover',
+        '均价': 'AveragePrice'
+    })
+    # 定义价格相关列和其他列
+    price_columns = ['Open', 'Close', 'High', 'Low', 'AveragePrice']
+    other_columns = ['Volume', 'Turnover']
+    # 检查价格相关列的0值
+    price_zero_count = 0
+    for col in price_columns:
+        zero_count = (df[col] == 0).sum()
+        price_zero_count += zero_count
+        if zero_count > 0:
+            print(f"价格列 {col} 中存在 {zero_count} 个0值，进行前向填充处理")
+            df[col] = df[col].replace(0, pd.NA).fillna(method='ffill')
+    if price_zero_count > 0:
+        print(f"价格相关列共存在 {price_zero_count} 个0值，已进行前向填充处理")
+    # 检查其他列的0值（可根据实际情况决定是否处理）
+    other_zero_count = 0
+    for col in other_columns:
+        zero_count = (df[col] == 0).sum()
+        other_zero_count += zero_count
+        if zero_count > 0:
+            print(f"其他列 {col} 中存在 {zero_count} 个0值，需根据业务逻辑决定是否处理")
+    if other_zero_count > 0:
+        print(f"其他列共存在 {other_zero_count} 个0值，需根据业务逻辑决定是否处理")
+    # 检查空值
+    null_count = df.isnull().sum().sum()
+    if null_count > 0:
+        print(f"数据中存在 {null_count} 个空值，进行前向填充处理")
+        df = df.fillna(method='ffill')
+    return df
+def save_data_to_csv(df, filename='stock_data.csv'):
+    if df is not None:
+        df.to_csv(filename, index=False)
+        print(f"数据已保存到 {filename}")
+def main():
+    symbol = "300773"
+    start_date = "2025-04-29 09:30:00"
+    end_date = "2025-04-29 15:00:00"
+    df = get_stock_data(symbol, start_date, end_date)
+    df['开盘'] = df['开盘'].fillna(22.96).replace(0, 22.96)
+    print(df)
+    # processed_df = process_stock_data(df)
+    save_data_to_csv(df)
+    # if processed_df is not None:
+    #     print(processed_df.columns)
+if __name__ == "__main__":
+    main()
+
+2.计算订单流不平衡
+
+
+data = pd.read_csv('stock_data.csv')
+print(data)
+# 计算每一行收盘价与上一行收盘价的差值，得到价格变化，并将结果存储在名为 'Price Change' 的新列中
+data['Price Change'] = data['Close'].diff()
+# 根据价格变化判断是否为买入成交量
+# 如果价格变化大于 0，说明价格上涨，将对应行的成交量赋值给 'Buy Volume' 列
+# 如果价格变化不大于 0，将 0 赋值给 'Buy Volume' 列
+data['Buy Volume'] = data['Volume'].where(data['Price Change'] > 0, 0)
+# 根据价格变化判断是否为卖出成交量
+# 如果价格变化小于 0，说明价格下跌，将对应行的成交量赋值给 'Sell Volume' 列
+# 如果价格变化不小于 0，将 0 赋值给 'Sell Volume' 列
+data['Sell Volume'] = data['Volume'].where(data['Price Change'] < 0, 0)
+# 计算买入成交量的累积和，即从第一行到当前行的买入成交量总和
+# 并将结果存储在名为 'Accumulated Buy Volume' 的新列中
+data['Accumulated Buy Volume'] = data['Buy Volume'].cumsum()
+# 计算卖出成交量的累积和，即从第一行到当前行的卖出成交量总和
+# 并将结果存储在名为 'Accumulated Sell Volume' 的新列中
+data['Accumulated Sell Volume'] = data['Sell Volume'].cumsum()
+# 计算订单流的不平衡情况
+# 用累积买入成交量减去累积卖出成交量，结果存储在名为 'Order Flow Imbalance' 的新列中
+# 该值为正表示买入力量占优，为负表示卖出力量占优
+data['Order Flow Imbalance'] = data['Accumulated Buy Volume'] - data['Accumulated Sell Volume']
+
+3.确定支撑位和阻力位
+
+
+def find_support_resistance(data, window=5, min_distance=0.5):
+    """
+    利用局部最小值和最大值来寻找支撑位和阻力位。
+    :param data: 包含价格数据的 DataFrame。
+    :param window: 用于查找局部最小值/最大值的周期数。
+    :param min_distance: 不同水平之间的最小价格差异。
+    :return: 支撑位和阻力位的列表。
+    """
+    # 查找局部最小值（支撑位）
+    # 使用 rolling 方法，以 window 为窗口大小，在数据的 'Close' 列上进行滚动操作
+    # center=True 表示将窗口的中心放在当前行，计算每个窗口内的最小值
+    # 结果存储在 'Support' 列中
+    data['Support'] = data['Close'].rolling(window=window, center=True).min()
+    # 去除 'Support' 列中的重复值和缺失值，并将结果转换为列表
+    support_levels = data['Support'].drop_duplicates().dropna().tolist()
+    # 查找局部最大值（阻力位）
+    # 同样使用 rolling 方法，计算每个窗口内的最大值
+    # 结果存储在 'Resistance' 列中
+    data['Resistance'] = data['Close'].rolling(window=window, center=True).max()
+    # 去除 'Resistance' 列中的重复值和缺失值，并将结果转换为列表
+    resistance_levels = data['Resistance'].drop_duplicates().dropna().tolist()
+    # 根据最小距离过滤水平
+    def filter_levels(levels, min_distance):
+        """
+        过滤掉距离小于最小距离的水平。
+        :param levels: 支撑位或阻力位的列表。
+        :param min_distance: 最小距离。
+        :return: 过滤后的水平列表。
+        """
+        filtered_levels = []
+        for level in levels:
+            # 如果 filtered_levels 列表为空，或者当前水平与列表中最后一个水平的差值绝对值大于等于最小距离
+            # 则将当前水平添加到 filtered_levels 列表中
+            if not filtered_levels or abs(level - filtered_levels[-1]) >= min_distance:
+                filtered_levels.append(level)
+        return filtered_levels
+    # 对支撑位列表进行过滤
+    support_levels = filter_levels(support_levels, min_distance)
+    # 对阻力位列表进行过滤
+    resistance_levels = filter_levels(resistance_levels, min_distance)
+    # 确保支撑位低于阻力位
+    if support_levels and resistance_levels:
+        # 找出支撑位列表中的最大值
+        max_support = max(support_levels)
+        # 找出阻力位列表中的最小值
+        min_resistance = min(resistance_levels)
+        # 移除高于最低阻力位的支撑位
+        # 只保留小于最小阻力位的支撑位
+        support_levels = [level for level in support_levels if level < min_resistance]
+        # 移除低于最高支撑位的阻力位
+        # 只保留大于最大支撑位的阻力位
+        resistance_levels = [level for level in resistance_levels if level > max_support]
+    return support_levels, resistance_levels
+
+def enforce_min_vertical_spacing(levels, min_vertical_distance):
+    """
+    强制使各个水平之间具有最小垂直距离。
+    :param levels: 支撑位或阻力位的列表。
+    :param min_vertical_distance: 各个水平之间的最小垂直距离。
+    :return: 经过过滤后的水平列表。
+    """
+    filtered_levels = []
+    for level in sorted(levels):
+        # 如果过滤后的列表为空，或者当前水平与过滤后列表中最后一个水平的差值
+        # 大于等于最小垂直距离，则将当前水平添加到过滤后的列表中
+        if not filtered_levels or (level - filtered_levels[-1]) >= min_vertical_distance:
+            filtered_levels.append(level)
+    return filtered_levels
+
+
+
+# 定义最小垂直距离
+min_vertical_distance = 10  # 例如，最小垂直距离为10
+# 调用函数进行过滤
+filtered_support_levels = enforce_min_vertical_spacing(support_levels, min_vertical_distance)
+filtered_resistance_levels = enforce_min_vertical_spacing(resistance_levels, min_vertical_distance)
+# 打印过滤后的水平
+print("过滤后的支撑位:", filtered_support_levels)
+print("过滤后的阻力位:", filtered_resistance_levels)
+
+
+4.买卖信号生成
+
+
+# 定义价格在支撑位/阻力位附近的价格范围
+price_range_percentage = 0.002  # 0.2% 的价格范围
+# 生成买入和卖出信号
+# 在数据中新增 'Buy Signal' 列，并初始化为 False，表示目前没有买入信号
+data['Buy Signal'] = False
+# 在数据中新增 'Sell Signal' 列，并初始化为 False，表示目前没有卖出信号
+data['Sell Signal'] = False
+# 遍历数据的索引（从 1 开始，确保在计算差值时有前一个值）
+for i in range(1, len(data)):  
+    # 获取当前行的收盘价
+    close_price = data['Close'].iloc[i]
+    # 获取当前行的订单流不平衡值
+    order_flow_imbalance = data['Order Flow Imbalance'].iloc[i]
+    # 检查买入信号（价格接近支撑位且订单流不平衡值小于 0）
+    for support_level in support_levels:
+        # 如果收盘价在支撑位的一定百分比范围内
+        if (close_price >= support_level * (1 - price_range_percentage)) and (close_price <= support_level * (1 + price_range_percentage)):
+            # 并且订单流不平衡值小于 0
+            if order_flow_imbalance < 0:
+                # 将当前行的 'Buy Signal' 设置为 True，表示有买入信号
+                data.at[data.index[i], 'Buy Signal'] = True
+    # 检查卖出信号（价格接近阻力位且订单流不平衡值大于 0）
+    for resistance_level in resistance_levels:
+        # 如果收盘价在阻力位的一定百分比范围内
+        if (close_price >= resistance_level * (1 - price_range_percentage)) and (close_price <= resistance_level * (1 + price_range_percentage)):
+            # 并且订单流不平衡值大于 0
+            if order_flow_imbalance > 0:
+                # 将当前行的 'Sell Signal' 设置为 True，表示有卖出信号
+                data.at[data.index[i], 'Sell Signal'] = True
+
+
+
+5.绘图观察实际效果
+# 创建一个包含两个子图的图形，图形大小为 (14, 10)，两个子图共享 x 轴
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10), sharex=True)
+# 在第一个子图中绘制股票收盘价，并绘制支撑位和阻力位
+ax1.plot(data.index, data['Close'], label='Close Price', color='blue')
+# 遍历支撑位列表，在图中绘制支撑位的水平线
+for level in support_levels:
+    ax1.axhline(y=level, color='green', linestyle='--', label='Support' if level == support_levels[0] else "")
+# 遍历阻力位列表，在图中绘制阻力位的水平线
+for level in resistance_levels:
+    ax1.axhline(y=level, color='red', linestyle='--', label='Resistance' if level == resistance_levels[0] else "")
+# 获取包含买入信号的数据行
+buy_signals = data[data['Buy Signal']]
+# 在第一个子图中用红色绘制买入信号点
+ax1.scatter(buy_signals.index, buy_signals['Close'], color='red', marker='^', label='Buy Signal', alpha=1)
+# 获取包含卖出信号的数据行
+sell_signals = data[data['Sell Signal']]
+# 在第一个子图中用绿色绘制卖出信号点
+ax1.scatter(sell_signals.index, sell_signals['Close'], color='green', marker='v', label='Sell Signal', alpha=1)
+# 设置第一个子图的标题
+ax1.set_title('Stock Price with Support and Resistance Levels')
+# 设置第一个子图的 y 轴标签
+ax1.set_ylabel('Price')
+# 显示第一个子图的图例
+ax1.legend()
+# 在第一个子图中显示网格线
+ax1.grid()
+# 在第二个子图中绘制订单流失衡数据
+ax2.plot(data.index, data['Order Flow Imbalance'], label='Order Flow Imbalance', color='purple')
+# 设置第二个子图的标题
+ax2.set_title('Order Flow Imbalance')
+# 设置第二个子图的 x 轴标签
+ax2.set_xlabel('Time')
+# 设置第二个子图的 y 轴标签
+ax2.set_ylabel('Order Flow Imbalance')
+# 显示第二个子图的图例
+ax2.legend()
+# 在第二个子图中显示网格线
+ax2.grid()
+# 调整图形布局，使其更加紧凑
+plt.tight_layout()
+# 显示图形
+plt.show()
+
+
+
+
+
+
+
+
