@@ -1,0 +1,48 @@
+import pandas as pd
+import numpy as np
+
+# 假设我们有一个包含股票价格数据的数据框
+data = {
+    'Date': pd.date_range(start='2023-01-01', periods=100, freq='D'),
+    'Close': np.random.normal(100, 10, 100),
+    'Volume': np.random.randint(1000, 5000, 100)
+}
+df = pd.DataFrame(data)
+df.set_index('Date', inplace=True)
+
+# 计算标准差（波动性）
+df['Return'] = df['Close'].pct_change()
+volatility = df['Return'].std()
+
+# 计算历史波动率
+historical_volatility = df['Return'].std() * np.sqrt(252)
+
+# 计算平均真实波动范围（ATR）
+df['High'] = df['Close'] * (1 + np.random.uniform(0, 0.05, 100))
+df['Low'] = df['Close'] * (1 - np.random.uniform(0, 0.05, 100))
+df['TR'] = df[['High', 'Low', 'Close']].apply(lambda x: max(x['High'] - x['Low'], abs(x['High'] - x['Close']), abs(x['Low'] - x['Close'])), axis=1)
+df['ATR'] = df['TR'].rolling(window=14).mean()
+
+# 计算成交量加权平均价格（VWAP）
+df['VWAP'] = (df['Close'] * df['Volume']).cumsum() / df['Volume'].cumsum()
+
+# 计算买卖价差（假设买入价和卖出价）
+df['Bid'] = df['Close'] * (1 - np.random.uniform(0, 0.01, 100))
+df['Ask'] = df['Close'] * (1 + np.random.uniform(0, 0.01, 100))
+df['Spread'] = df['Ask'] - df['Bid']
+
+# 计算换手率
+shares_outstanding = 1000000# 假设流通股数量
+df['Turnover'] = df['Volume'] / shares_outstanding
+
+# 计算安德森流动性比率
+df['Amihud'] = (df['Return'].abs() / df['Volume']).rolling(window=14).mean()
+
+# 打印结果
+print("Volatility:", volatility)
+print("Historical Volatility:", historical_volatility)
+print("Average True Range (ATR):", df['ATR'].iloc[-1])
+print("VWAP:", df['VWAP'].iloc[-1])
+print("Bid-Ask Spread:", df['Spread'].mean())
+print("Turnover Ratio:", df['Turnover'].mean())
+pri
