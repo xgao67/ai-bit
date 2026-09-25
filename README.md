@@ -1,12 +1,3 @@
-# Python量化交易实验代码
-
-基于python的币圈量化交易实验项目，next2.0版本。
-
-微信公众号：NextB
-
-二维码：
-
-![qrcode](./qrcode.jpeg)
 
 ## 一、安装命令
 
